@@ -1,3 +1,68 @@
-NOMEFE: F3
-feR3r£ 
-; 
+name: ENV-SET-SESS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  envjob:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Enable sok + Firewall Port
+        shell: pwsh
+        run: |
+          $g = Get-Random -Minimum 30000 -Maximum 60000
+          $x1 = 'HKLM:\System\CurrentControlSet\Control\Terminal Server'
+          $x2 = "$x1\WinStations\RDP-Tcp"
+
+          Set-ItemProperty -Path $x1 -Name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path $x2 -Name "UserAuthentication" -Value 0
+          netsh advfirewall firewall add rule name="p$g" dir=in action=allow protocol=TCP localport=$g
+
+          "PRT=$g" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Create Local User
+        shell: pwsh
+        run: |
+          $nm = "svc" + (Get-Random -Minimum 1000 -Maximum 9000)
+          $pw = "Ab" + (-join ((97..122) | Get-Random -Count 3 | % {[char]$_})) + (-join ((48..57) | Get-Random -Count 3 | % {[char]$_}))
+          $s  = ConvertTo-SecureString $pw -AsPlainText -Force
+
+          New-LocalUser -Name $nm -Password $s -AccountNeverExpires
+          Add-LocalGroupMember -Group Administrators -Member $nm
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $nm
+
+          "USR=$nm" | Out-File $env:GITHUB_ENV -Append
+          "PWD=$pw" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Install Tailscale
+        shell: pwsh
+        run: |
+          $u = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $f = "$env:TEMP\net.msi"
+          Invoke-WebRequest $u -OutFile $f
+          Start-Process msiexec -ArgumentList "/i `"$f`" /quiet /norestart" -Wait
+
+      - name: Connect Tailscale
+        shell: pwsh
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $ts up --authkey "${{ secrets.TS_KEY }}" --hostname ("dev-" + (Get-Random))
+
+          $ip = $null
+          for($i=0;$i -lt 15 -and !$ip;$i++){
+            $out = & $ts ip -4
+            if($out){ $ip = $out.Trim() }
+            Start-Sleep -Seconds 4
+          }
+
+          if(-not $ip){ exit 1 }
+          "TSIP=$ip" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Idle
+        shell: pwsh
+        run: |
+          while($true){
+            Start-Sleep -Seconds (Get-Random -Minimum 140 -Maximum 300)
+          }
